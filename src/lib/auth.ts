@@ -1,99 +1,162 @@
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { getDb, type UserRole, type UserRow } from "@/lib/db";
+import { verifyPassword } from "@/lib/password";
 
-const clerkCookie = "document_vault_clerk";
-const tokenMaxAgeSeconds = 60 * 60 * 8;
+const sessionCookie = "pdl_session";
+const sessionMaxAgeSeconds = 60 * 60 * 8;
+const rememberedSessionMaxAgeSeconds = 60 * 60 * 24 * 7;
+const maxFailedLogins = 5;
+const lockoutMinutes = 15;
 
-type SessionPayload = {
-  scope: string;
-  exp: number;
+export type CurrentUser = Pick<UserRow, "id" | "email" | "name" | "role">;
+
+export type RequestContext = {
+  ipAddress: string | null;
+  userAgent: string | null;
 };
 
-export function hashPassword(password: string) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("hex");
-  return `pbkdf2:${salt}:${hash}`;
+export function canMaintain(user: CurrentUser | null) {
+  return Boolean(user && (user.role === "clerk" || user.role === "admin"));
 }
 
-export function verifyPassword(password: string, storedHash: string | null) {
-  if (!storedHash) {
-    return false;
-  }
-
-  const [, salt, expected] = storedHash.split(":");
-  if (!salt || !expected) {
-    return false;
-  }
-
-  const actual = crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("hex");
-  return safeEqual(actual, expected);
+export function canAdmin(user: CurrentUser | null) {
+  return user?.role === "admin";
 }
 
-export function verifyClerkPassword(password: string) {
-  const expectedHash = process.env.CLERK_PASSWORD_HASH ?? null;
-  if (expectedHash) {
-    return verifyPassword(password, expectedHash);
-  }
-
-  const expectedPassword = process.env.CLERK_PASSWORD;
-  return typeof expectedPassword === "string" && expectedPassword.length > 0 && safeEqual(password, expectedPassword);
-}
-
-export async function isClerkSession() {
-  return Boolean(await readSession(clerkCookie, "clerk"));
-}
-
-export async function setClerkSession() {
-  await writeSession(clerkCookie, "clerk");
-}
-
-export async function clearClerkSession() {
-  (await cookies()).delete(clerkCookie);
-}
-
-async function writeSession(name: string, scope: string) {
-  const expiresAt = Math.floor(Date.now() / 1000) + tokenMaxAgeSeconds;
-  const payload: SessionPayload = { scope, exp: expiresAt };
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = sign(body);
-
-  (await cookies()).set(name, `${body}.${signature}`, {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: tokenMaxAgeSeconds,
-    path: "/"
-  });
-}
-
-async function readSession(name: string, scope: string) {
-  const token = (await cookies()).get(name)?.value;
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const token = (await cookies()).get(sessionCookie)?.value;
   if (!token) {
     return null;
   }
 
-  const [body, signature] = token.split(".");
-  if (!body || !signature || !safeEqual(sign(body), signature)) {
+  const tokenHash = hashToken(token);
+  const now = new Date().toISOString();
+  const database = getDb();
+  const row = database
+    .prepare(
+      `SELECT u.id, u.email, u.name, u.role, u.is_active
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ? AND s.expires_at > ?`
+    )
+    .get(tokenHash, now) as (CurrentUser & { is_active: 0 | 1 }) | undefined;
+
+  if (!row || row.is_active !== 1) {
+    await clearSession();
     return null;
   }
 
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as SessionPayload;
-    if (payload.scope !== scope || payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
-    return payload;
-  } catch {
-    return null;
+  database.prepare("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?").run(now, tokenHash);
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role
+  };
+}
+
+export async function requireUser() {
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect("/login");
   }
+  return user;
 }
 
-function sign(value: string) {
-  const secret = process.env.AUTH_SECRET ?? process.env.CLERK_PASSWORD ?? "document-vault-local-secret";
-  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
+export async function requireRole(roles: UserRole[]) {
+  const user = await requireUser();
+  if (!roles.includes(user.role)) {
+    redirect("/?error=forbidden");
+  }
+  return user;
 }
 
-function safeEqual(a: string, b: string) {
-  const aBuffer = Buffer.from(a);
-  const bBuffer = Buffer.from(b);
-  return aBuffer.length === bBuffer.length && crypto.timingSafeEqual(aBuffer, bBuffer);
+export async function authenticateUser(email: string, password: string, context: RequestContext, remember = false) {
+  const database = getDb();
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = database.prepare("SELECT * FROM users WHERE email = ?").get(normalizedEmail) as UserRow | undefined;
+  const now = new Date();
+
+  if (!user || user.is_active !== 1) {
+    return { ok: false as const, reason: "invalid" as const, user: null };
+  }
+
+  if (user.locked_until && new Date(user.locked_until) > now) {
+    return { ok: false as const, reason: "locked" as const, user };
+  }
+
+  if (!verifyPassword(password, user.password_hash)) {
+    const failedCount = user.failed_login_count + 1;
+    const lockedUntil =
+      failedCount >= maxFailedLogins ? new Date(now.getTime() + lockoutMinutes * 60 * 1000).toISOString() : null;
+    database
+      .prepare("UPDATE users SET failed_login_count = ?, locked_until = ?, updated_at = ? WHERE id = ?")
+      .run(failedCount, lockedUntil, now.toISOString(), user.id);
+    return { ok: false as const, reason: lockedUntil ? ("locked" as const) : ("invalid" as const), user };
+  }
+
+  database
+    .prepare(
+      `UPDATE users
+       SET failed_login_count = 0, locked_until = NULL, last_login_at = ?, updated_at = ?
+       WHERE id = ?`
+    )
+    .run(now.toISOString(), now.toISOString(), user.id);
+  await createSession(user, context, remember);
+  return { ok: true as const, user };
+}
+
+export async function createSession(user: Pick<UserRow, "id">, context: RequestContext, remember = false) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
+  const now = new Date();
+  const maxAge = remember ? rememberedSessionMaxAgeSeconds : sessionMaxAgeSeconds;
+  const expiresAt = new Date(now.getTime() + maxAge * 1000).toISOString();
+
+  getDb()
+    .prepare(
+      `INSERT INTO sessions (user_id, token_hash, expires_at, created_at, last_seen_at, ip_address, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(user.id, tokenHash, expiresAt, now.toISOString(), now.toISOString(), context.ipAddress, context.userAgent);
+
+  (await cookies()).set(sessionCookie, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge,
+    path: "/"
+  });
+}
+
+export async function clearSession() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(sessionCookie)?.value;
+  if (token) {
+    getDb().prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
+  }
+  cookieStore.delete(sessionCookie);
+}
+
+export async function getRequestContext(): Promise<RequestContext> {
+  const headerStore = await headers();
+  const forwardedFor = headerStore.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return {
+    ipAddress: forwardedFor || headerStore.get("x-real-ip") || null,
+    userAgent: headerStore.get("user-agent") || null
+  };
+}
+
+export function getRequestContextFromRequest(request: Request): RequestContext {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return {
+    ipAddress: forwardedFor || request.headers.get("x-real-ip") || null,
+    userAgent: request.headers.get("user-agent")
+  };
+}
+
+export function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("base64url");
 }

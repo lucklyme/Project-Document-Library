@@ -3,6 +3,52 @@ import Database from "better-sqlite3";
 import { dbDir, dbPath, filesDir } from "@/lib/paths";
 
 export type DocumentStatus = "active" | "obsolete";
+export type UserRole = "employee" | "clerk" | "admin";
+
+export type UserRow = {
+  id: number;
+  email: string;
+  name: string;
+  role: UserRole;
+  password_hash: string;
+  is_active: 0 | 1;
+  failed_login_count: number;
+  locked_until: string | null;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SessionRow = {
+  id: number;
+  user_id: number;
+  token_hash: string;
+  expires_at: string;
+  created_at: string;
+  last_seen_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+};
+
+export type AuditLogRow = {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  user_role: UserRole | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  target_label: string | null;
+  result: "success" | "failure" | "denied";
+  ip_address: string | null;
+  user_agent: string | null;
+  request_id: string;
+  message: string | null;
+  metadata: string | null;
+  prev_hash: string | null;
+  event_hash: string;
+  created_at: string;
+};
 
 export type DocumentRow = {
   id: number;
@@ -68,6 +114,64 @@ function migrate(database: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      failed_login_count INTEGER NOT NULL DEFAULT 0,
+      locked_until TEXT,
+      last_login_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ip_address TEXT,
+      user_agent TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      ip_address TEXT,
+      user_agent TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      user_email TEXT,
+      user_role TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      target_label TEXT,
+      result TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      request_id TEXT NOT NULL,
+      message TEXT,
+      metadata TEXT,
+      prev_hash TEXT,
+      event_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,
@@ -110,10 +214,40 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_versions_current ON document_versions(is_current);
     CREATE INDEX IF NOT EXISTS idx_changes_document_id ON document_changes(document_id);
     CREATE INDEX IF NOT EXISTS idx_changes_change_no ON document_changes(change_no);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+    CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_reset_token_hash ON password_reset_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
   `);
 
   mergeDuplicateDocuments(database);
+  bootstrapInitialAdmin(database);
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_code_unique ON documents(code);");
+}
+
+function bootstrapInitialAdmin(database: Database.Database) {
+  const hasAdmin = database.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
+  if (hasAdmin) {
+    return;
+  }
+
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const passwordHash = process.env.ADMIN_PASSWORD_HASH?.trim();
+  if (!email || !passwordHash) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `INSERT INTO users (email, name, role, password_hash, is_active, created_at, updated_at)
+       VALUES (?, ?, 'admin', ?, 1, ?, ?)`
+    )
+    .run(email, "Administrator", passwordHash, now, now);
 }
 
 function mergeDuplicateDocuments(database: Database.Database) {

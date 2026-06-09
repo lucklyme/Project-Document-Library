@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
+import { writeAuditLog } from "@/lib/audit";
+import { canMaintain, getCurrentUser, getRequestContextFromRequest } from "@/lib/auth";
 import { getProjectName, listCurrentDocuments } from "@/lib/repository";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const user = await getCurrentUser();
+  const context = getRequestContextFromRequest(request);
+  if (!canMaintain(user)) {
+    writeAuditLog({ user, action: "document.export", result: "denied", context });
+    return new NextResponse("Export is restricted", { status: 403 });
+  }
+
   const projectName = getProjectName();
   const rows = listCurrentDocuments();
   const csv = [
@@ -20,6 +29,7 @@ export async function GET() {
     .map((row) => row.map(escapeCsv).join(","))
     .join("\r\n");
 
+  writeAuditLog({ user, action: "document.export", targetLabel: projectName, context, metadata: { count: rows.length } });
   return new NextResponse(`\uFEFF${csv}`, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

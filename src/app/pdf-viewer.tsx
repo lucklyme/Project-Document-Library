@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PDFDocumentProxy, PDFDocumentLoadingTask } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 type PdfViewerProps = {
   fileUrl: string;
   title: string;
+  watermarkEnabled: boolean;
 };
 
 const loadTimeoutMs = 30000;
 
-export function PdfViewer({ fileUrl, title }: PdfViewerProps) {
+export function PdfViewer({ fileUrl, title, watermarkEnabled }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<PDFDocumentLoadingTask | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -56,10 +57,7 @@ export function PdfViewer({ fileUrl, title }: PdfViewerProps) {
 
       try {
         const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url
-        ).toString();
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
         const task = pdfjs.getDocument({
           disableAutoFetch: false,
@@ -77,7 +75,7 @@ export function PdfViewer({ fileUrl, title }: PdfViewerProps) {
           if (cancelled) {
             return;
           }
-          setError("PDF 加载超时，请点击重新加载。");
+          setError("PDF 加载超时，请重新加载。");
           setLoadingText("");
           void task.destroy();
         }, loadTimeoutMs);
@@ -144,7 +142,7 @@ export function PdfViewer({ fileUrl, title }: PdfViewerProps) {
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : "unknown error";
-          setError(`PDF 在线查看加载失败：${message}。请点击重新加载，或联系资料员确认文件是否可用。`);
+          setError(`PDF 在线查看加载失败：${message}。请重新加载，或联系资料员确认文件是否可用。`);
           setLoadingText("");
         }
       }
@@ -171,6 +169,7 @@ export function PdfViewer({ fileUrl, title }: PdfViewerProps) {
           <strong>{title}</strong>
           <span>{pageCount > 0 ? `${pageCount} 页` : "加载中"}</span>
         </div>
+        {watermarkEnabled ? <div className="pdf-security-tip">已开启文件水印，请勿随意拍照、截图或外传。</div> : null}
         <div className="pdf-controls">
           <label className="pdf-zoom-control">
             <span>缩放</span>

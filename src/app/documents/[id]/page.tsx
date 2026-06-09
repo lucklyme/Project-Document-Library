@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { markObsolete, replaceChangeAction, replaceVersionAction, restoreActive } from "@/app/actions";
-import { isClerkSession } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
+import { canMaintain, getRequestContext, requireUser } from "@/lib/auth";
 import { getDocumentDetail, getProjectName } from "@/lib/repository";
 
 type DetailProps = {
@@ -10,15 +11,18 @@ type DetailProps = {
 };
 
 export default async function DocumentDetailPage({ params, searchParams }: DetailProps) {
+  const user = await requireUser();
+  const context = await getRequestContext();
   const { id } = await params;
   const { error } = await searchParams;
   const document = getDocumentDetail(Number(id));
 
   if (!document) {
+    writeAuditLog({ user, action: "document.detail", result: "failure", message: "document not found", context });
     notFound();
   }
 
-  const isClerk = await isClerkSession();
+  const maintainer = canMaintain(user);
 
   return (
     <main className="shell">
@@ -32,7 +36,7 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
           <h1>{document.code}</h1>
           <p>{document.title}</p>
         </div>
-        {isClerk ? (
+        {maintainer ? (
           document.status === "active" ? (
             <form action={markObsolete}>
               <input type="hidden" name="id" value={document.id} />
@@ -73,8 +77,8 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
                   </small>
                   <div className="version-actions timeline-actions">
                     <Link href={`/viewer/${version.id}`}>查看</Link>
-                    {isClerk ? <a href={`/api/files/${version.id}`}>下载</a> : null}
-                    {isClerk ? (
+                    {maintainer ? <a href={`/api/files/${version.id}`}>下载</a> : null}
+                    {maintainer ? (
                       <form className="replace-form compact" action={replaceVersionAction}>
                         <input type="hidden" name="documentId" value={document.id} />
                         <input type="hidden" name="versionId" value={version.id} />
@@ -108,8 +112,8 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
                   </small>
                   <div className="version-actions timeline-actions">
                     <Link href={`/changes/${change.id}/viewer`}>查看</Link>
-                    {isClerk ? <a href={`/api/changes/${change.id}/file`}>下载</a> : null}
-                    {isClerk ? (
+                    {maintainer ? <a href={`/api/changes/${change.id}/file`}>下载</a> : null}
+                    {maintainer ? (
                       <form className="replace-form compact" action={replaceChangeAction}>
                         <input type="hidden" name="documentId" value={document.id} />
                         <input type="hidden" name="changeId" value={change.id} />

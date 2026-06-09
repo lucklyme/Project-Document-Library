@@ -44,6 +44,13 @@ button,
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
+.compact-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+}
+
 button:hover,
 .secondary-button:hover {
   box-shadow: 0 12px 28px rgba(20, 92, 74, 0.22);
@@ -83,6 +90,11 @@ input[type="checkbox"] {
 
 input[type="file"] {
   min-width: 220px;
+}
+
+label {
+  color: var(--muted);
+  font-weight: 900;
 }
 
 .upload-dropzone input[type="file"] {
@@ -455,6 +467,28 @@ input[type="file"] {
   margin-top: 18px;
 }
 
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.home-actions form {
+  display: flex;
+}
+
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 250, 240, 0.82);
+  padding: 0.35rem 0.45rem;
+}
+
 .auth-strip form,
 .inline-form,
 .stack-form,
@@ -481,6 +515,147 @@ input[type="file"] {
   padding: 20px 24px;
 }
 
+.stack-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.stack-form .checkbox-control {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.admin-nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 250, 240, 0.78);
+  box-shadow: 0 12px 40px rgba(38, 52, 45, 0.1);
+  margin-bottom: 18px;
+  padding: 10px 12px;
+}
+
+.admin-nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-nav-links a {
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+}
+
+.admin-nav-links a:hover {
+  background: rgba(20, 92, 74, 0.1);
+}
+
+.admin-nav form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.audit-list {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.audit-row {
+  border: 1px solid rgba(222, 211, 191, 0.75);
+  border-radius: 18px;
+  background: #fffaf0;
+  padding: 14px;
+}
+
+.user-table {
+  display: grid;
+  gap: 0;
+  padding: 14px;
+  overflow-x: auto;
+}
+
+.user-row,
+.user-edit-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(150px, 0.8fr) 140px 120px 90px minmax(320px, 1.3fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.user-row {
+  min-width: 1080px;
+  border-top: 1px solid rgba(222, 211, 191, 0.75);
+  padding: 10px;
+}
+
+.user-row:first-child {
+  border-top: 0;
+}
+
+.user-head,
+.audit-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.user-head {
+  background: rgba(20, 92, 74, 0.06);
+  border-radius: 14px;
+}
+
+.user-edit-form {
+  display: contents;
+}
+
+.user-password-form {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 90px minmax(180px, 1fr) minmax(160px, 1fr) 140px 170px;
+  gap: 10px;
+  align-items: center;
+}
+
+.audit-head {
+  background: rgba(20, 92, 74, 0.06);
+}
+
+.audit-row p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+}
+
+.radio-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fffaf0;
+  color: var(--ink);
+  padding: 0.85rem 1rem;
+}
+
+.radio-card input {
+  width: 1rem;
+  height: 1rem;
+}
+
 .fit {
   width: fit-content;
 }
@@ -489,6 +664,30 @@ input[type="file"] {
   border-top: 1px solid var(--line);
   color: var(--muted);
   padding: 28px 24px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 16px 20px;
+}
+
+.pagination a,
+.pagination span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffaf0;
+  font-weight: 900;
+  padding: 0.55rem 0.85rem;
+}
+
+.pagination .disabled-link {
+  color: var(--muted);
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .back-link {
@@ -710,6 +909,15 @@ input[type="file"] {
   padding: 16px 20px;
 }
 
+.pdf-security-tip {
+  flex: 0 1 auto;
+  color: var(--danger);
+  font-size: 0.92rem;
+  font-weight: 900;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .pdf-toolbar strong {
   display: block;
   max-width: min(760px, 58vw);
@@ -811,11 +1019,29 @@ input[type="file"] {
   }
 
   .auth-strip form,
+  .home-actions,
+  .home-actions form,
   .version-card,
   .version-actions,
-  .inline-form {
+  .inline-form,
+  .audit-row,
+  .admin-nav,
+  .admin-nav form {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .audit-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .user-row {
+    min-width: 980px;
+  }
+
+  .admin-nav form {
+    margin-left: 0;
   }
 
   .replace-form {

@@ -13,7 +13,6 @@ type UploadStatus = "pending" | "uploading" | "done" | "failed" | "skipped";
 type UploadItem = {
   id: string;
   file: File;
-  name: string;
   relativePath: string;
   size: number;
   status: UploadStatus;
@@ -21,7 +20,7 @@ type UploadItem = {
 };
 
 const concurrency = 2;
-const doneStorageKey = "document-vault-upload-done";
+const doneStorageKey = "document-library-upload-done";
 
 export function UploadForm() {
   const router = useRouter();
@@ -90,11 +89,10 @@ export function UploadForm() {
       return {
         id: `${key}-${Math.random().toString(36).slice(2)}`,
         file,
-        name: file.name,
         relativePath,
         size: file.size,
         status: isDone || isDuplicate ? "skipped" : "pending",
-        message: isDone ? "已上传，已跳过" : isDuplicate ? "队列中已存在，已跳过" : ""
+        message: isDone ? "已上传，自动跳过" : isDuplicate ? "队列中已存在，自动跳过" : ""
       } satisfies UploadItem;
     });
 
@@ -205,7 +203,7 @@ export function UploadForm() {
   return (
     <section className="upload-card">
       <div>
-        <p className="eyebrow">批量上传</p>
+        <p className="eyebrow">Batch Upload</p>
         <h2>上传文件</h2>
         <p>选择文件、选择文件夹，或把文件拖到这里。系统默认同时上传 2 个文件。</p>
       </div>
@@ -225,7 +223,7 @@ export function UploadForm() {
         onDrop={handleDrop}
       >
         <strong>拖拽文件到此处</strong>
-        <span>也可以使用下方按钮添加文件或文件夹</span>
+        <span>也可以使用下方按钮添加文件或文件夹。</span>
         <div className="upload-pickers">
           <button type="button" onClick={() => fileInputRef.current?.click()}>
             添加文件
