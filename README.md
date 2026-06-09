@@ -55,24 +55,24 @@ volumes:
 Version file example:
 
 ```text
-LYG-2010-CC-N105 Rev.0 Factory basement structural layout.pdf
+ABC-2010-CC-N105 Rev.0 Factory basement structural layout.pdf
 ```
 
 Parsed fields:
 
-- Document code: `LYG-2010-CC-N105`
+- Document code: `ABC-2010-CC-N105`
 - Version: `Rev.0`
 - Title: `Factory basement structural layout`
 
 Change notice example:
 
 ```text
-LYG-VW50-Z0-011-XG-001 Welding impact test temperature change notice.pdf
+ABC-VW50-Z0-011-XG-001 Welding impact test temperature change notice.pdf
 ```
 
 Parsed fields:
 
-- Document code: `LYG-VW50-Z0-011`
+- Document code: `ABC-VW50-Z0-011`
 - Change number: `XG-001`
 - Title: `Welding impact test temperature change notice`
 
