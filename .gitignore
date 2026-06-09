@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.next-dev/
+data/
+*.log
+.env.local
+.env.*.local
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

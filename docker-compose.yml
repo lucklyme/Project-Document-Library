@@ -1,0 +1,38 @@
+services:
+  document-library:
+    build: .
+    container_name: project-document-library
+    ports:
+      - "3000:3000"
+    environment:
+      DATA_DIR: /data
+      APP_PROJECT_NAME: "Project A Document Library"
+      AUTH_SECRET: "replace-with-a-long-random-secret"
+      ADMIN_EMAIL: "admin@example.com"
+      ADMIN_PASSWORD_HASH: "replace-with-generated-password-hash"
+      NODE_OPTIONS: "--max-old-space-size=3072"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./data/project-a/files:/data/files
+      - ./data/project-a/db:/data/db
+    restart: unless-stopped
+
+  # To deploy another project, copy the service, change the port, and mount
+  # a different data directory.
+  # document-library-project-b:
+  #   build: .
+  #   container_name: project-document-library-b
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     DATA_DIR: /data
+  #     APP_PROJECT_NAME: "Project B Document Library"
+  #     AUTH_SECRET: "replace-with-a-long-random-secret"
+  #     ADMIN_EMAIL: "admin@example.com"
+  #     ADMIN_PASSWORD_HASH: "replace-with-generated-password-hash"
+  #     NODE_OPTIONS: "--max-old-space-size=3072"
+  #     NEXT_TELEMETRY_DISABLED: "1"
+  #   volumes:
+  #     - ./data/project-b/files:/data/files
+  #     - ./data/project-b/db:/data/db
+  #   restart: unless-stopped
