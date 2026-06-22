@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { logoutAction } from "@/app/actions";
 import type { CurrentUser } from "@/lib/auth";
+import { displayUserName } from "@/lib/user-display";
 
 export function AdminNav({ user }: { user: CurrentUser }) {
   return (
@@ -13,7 +14,7 @@ export function AdminNav({ user }: { user: CurrentUser }) {
         <Link href="/admin/audit-logs">审计日志</Link>
       </div>
       <form action={logoutAction}>
-        <span>{user.name}</span>
+        <span>{displayUserName(user)}</span>
         <button type="submit">退出</button>
       </form>
     </section>

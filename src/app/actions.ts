@@ -13,19 +13,35 @@ import {
   requireRole,
   requireUser
 } from "@/lib/auth";
+import { isLocalAdminFallbackEnabled, isSsoEnabled } from "@/lib/auth-mode";
 import { getDb, type UserRole, type UserRow } from "@/lib/db";
 import { sendPasswordResetEmail, sendTestEmail } from "@/lib/mailer";
 import { hashPassword, validatePasswordPolicy } from "@/lib/password";
 import { createPasswordResetToken, consumePasswordResetToken } from "@/lib/reset-tokens";
-import { replaceChangeFile, replaceVersionFile, setDocumentStatus } from "@/lib/repository";
+import { deleteChangeFile, deleteVersionFile, replaceChangeFile, replaceVersionFile, setDocumentStatus } from "@/lib/repository";
 import { saveMailSettings, saveWatermarkSettings, type WatermarkMode } from "@/lib/settings";
+import { getSsoLogoutUrl } from "@/lib/sso";
 
 export async function loginAction(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const remember = formData.get("remember") === "1";
+  const failurePath = normalizeLoginFailurePath(String(formData.get("failurePath") ?? "/login"));
   const context = await getRequestContext();
-  const result = await authenticateUser(email, password, context, remember);
+  const adminOnly = isSsoEnabled();
+
+  if (adminOnly && !isLocalAdminFallbackEnabled()) {
+    writeAuditLog({
+      action: "auth.login",
+      result: "denied",
+      message: "local admin fallback disabled",
+      context,
+      metadata: { email: email.trim().toLowerCase(), adminOnly }
+    });
+    redirect("/login?error=invalid");
+  }
+
+  const result = await authenticateUser(email, password, context, remember, { adminOnly });
 
   writeAuditLog({
     user: result.user,
@@ -33,11 +49,11 @@ export async function loginAction(formData: FormData) {
     result: result.ok ? "success" : "failure",
     message: result.ok ? null : result.reason,
     context,
-    metadata: { email: email.trim().toLowerCase(), remember }
+    metadata: { email: email.trim().toLowerCase(), remember, adminOnly }
   });
 
   if (!result.ok) {
-    redirect(`/login?error=${result.reason}`);
+    redirect(`${failurePath}?error=${result.reason}`);
   }
 
   redirect("/");
@@ -48,13 +64,24 @@ export async function logoutAction() {
   const context = await getRequestContext();
   await clearSession();
   writeAuditLog({ user, action: "auth.logout", context });
+  if (user?.authProvider === "synology-sso") {
+    let logoutUrl = "/login";
+    try {
+      logoutUrl = await getSsoLogoutUrl();
+    } catch (error) {
+      console.error("SSO logout failed", error);
+    }
+    redirect(logoutUrl);
+  }
   redirect("/login");
 }
 
 export async function requestPasswordResetAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const context = await getRequestContext();
-  const user = getDb().prepare("SELECT * FROM users WHERE email = ? AND is_active = 1").get(email) as UserRow | undefined;
+  const user = getDb()
+    .prepare("SELECT * FROM users WHERE email = ? AND is_active = 1 AND auth_provider = 'local'")
+    .get(email) as UserRow | undefined;
 
   if (user) {
     try {
@@ -136,10 +163,10 @@ export async function createUserAction(formData: FormData) {
   try {
     getDb()
       .prepare(
-        `INSERT INTO users (email, name, role, password_hash, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 1, ?, ?)`
+        `INSERT INTO users (email, name, role, password_hash, auth_provider, login_name, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'local', ?, 1, ?, ?)`
       )
-      .run(email, name, role, hashPassword(password), new Date().toISOString(), new Date().toISOString());
+      .run(email, name, role, hashPassword(password), email, new Date().toISOString(), new Date().toISOString());
     writeAuditLog({ user: admin, action: "admin.user_created", targetType: "user", targetLabel: email, context });
   } catch (error) {
     writeAuditLog({
@@ -185,7 +212,7 @@ export async function adminResetPasswordAction(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const user = getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
 
-  if (!user || !validatePasswordPolicy(password, user.email).ok) {
+  if (!user || user.auth_provider !== "local" || !validatePasswordPolicy(password, user.email).ok) {
     redirect("/admin/users?error=password");
   }
 
@@ -344,8 +371,110 @@ export async function replaceChangeAction(formData: FormData) {
   redirect(`/documents/${documentId}`);
 }
 
+export async function deleteVersionAction(formData: FormData) {
+  const user = await requireRole(["clerk", "admin"]);
+  const context = await getRequestContext();
+  const documentId = Number(formData.get("documentId"));
+  const versionId = Number(formData.get("versionId"));
+
+  if (!Number.isFinite(versionId)) {
+    redirect(`/documents/${documentId}?error=delete`);
+  }
+
+  let result: ReturnType<typeof deleteVersionFile>;
+  try {
+    result = deleteVersionFile(versionId);
+  } catch (error) {
+    writeAuditLog({
+      user,
+      action: "document.version_deleted",
+      targetType: "version",
+      targetId: versionId,
+      result: "failure",
+      message: error instanceof Error ? error.message : "delete failed",
+      context,
+      metadata: { documentId }
+    });
+    redirect(`/documents/${documentId}?error=delete`);
+  }
+
+  writeAuditLog({
+    user,
+    action: "document.version_deleted",
+    targetType: "version",
+    targetId: versionId,
+    result: result.ok ? "success" : "failure",
+    message: result.message,
+    context,
+    metadata: { documentId, deletedDocument: result.deletedDocument ?? false }
+  });
+
+  if (!result.ok) {
+    redirect(`/documents/${documentId}?error=delete`);
+  }
+
+  revalidatePath("/");
+  if (result.deletedDocument) {
+    redirect("/");
+  }
+
+  revalidatePath(`/documents/${result.documentId}`);
+  redirect(`/documents/${result.documentId}`);
+}
+
+export async function deleteChangeAction(formData: FormData) {
+  const user = await requireRole(["clerk", "admin"]);
+  const context = await getRequestContext();
+  const documentId = Number(formData.get("documentId"));
+  const changeId = Number(formData.get("changeId"));
+
+  if (!Number.isFinite(changeId)) {
+    redirect(`/documents/${documentId}?error=deleteChange`);
+  }
+
+  let result: ReturnType<typeof deleteChangeFile>;
+  try {
+    result = deleteChangeFile(changeId);
+  } catch (error) {
+    writeAuditLog({
+      user,
+      action: "document.change_deleted",
+      targetType: "change",
+      targetId: changeId,
+      result: "failure",
+      message: error instanceof Error ? error.message : "delete failed",
+      context,
+      metadata: { documentId }
+    });
+    redirect(`/documents/${documentId}?error=deleteChange`);
+  }
+
+  writeAuditLog({
+    user,
+    action: "document.change_deleted",
+    targetType: "change",
+    targetId: changeId,
+    result: result.ok ? "success" : "failure",
+    message: result.message,
+    context,
+    metadata: { documentId }
+  });
+
+  if (!result.ok) {
+    redirect(`/documents/${documentId}?error=deleteChange`);
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/documents/${result.documentId}`);
+  redirect(`/documents/${result.documentId}`);
+}
+
 function normalizeRole(value: string): UserRole {
   return value === "clerk" || value === "admin" ? value : "employee";
+}
+
+function normalizeLoginFailurePath(value: string) {
+  return value === "/login/local-admin" ? value : "/login";
 }
 
 function normalizeWatermarkMode(value: string): WatermarkMode {

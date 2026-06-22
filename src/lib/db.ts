@@ -4,6 +4,7 @@ import { dbDir, dbPath, filesDir } from "@/lib/paths";
 
 export type DocumentStatus = "active" | "obsolete";
 export type UserRole = "employee" | "clerk" | "admin";
+export type AuthProvider = "local" | "synology-sso";
 
 export type UserRow = {
   id: number;
@@ -11,6 +12,9 @@ export type UserRow = {
   name: string;
   role: UserRole;
   password_hash: string;
+  auth_provider: AuthProvider;
+  external_subject: string | null;
+  login_name: string | null;
   is_active: 0 | 1;
   failed_login_count: number;
   locked_until: string | null;
@@ -224,9 +228,28 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
   `);
 
+  ensureColumn(database, "users", "auth_provider", "TEXT NOT NULL DEFAULT 'local'");
+  ensureColumn(database, "users", "external_subject", "TEXT");
+  ensureColumn(database, "users", "login_name", "TEXT");
+  database.prepare("UPDATE users SET auth_provider = 'local' WHERE auth_provider IS NULL OR auth_provider = ''").run();
+  database.prepare("UPDATE users SET login_name = email WHERE login_name IS NULL OR login_name = ''").run();
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external_identity
+      ON users(auth_provider, external_subject)
+      WHERE external_subject IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_users_login_name ON users(login_name);
+  `);
+
   mergeDuplicateDocuments(database);
   bootstrapInitialAdmin(database);
   database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_code_unique ON documents(code);");
+}
+
+function ensureColumn(database: Database.Database, table: string, column: string, definition: string) {
+  const columns = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((row) => row.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
 }
 
 function bootstrapInitialAdmin(database: Database.Database) {
@@ -244,10 +267,10 @@ function bootstrapInitialAdmin(database: Database.Database) {
   const now = new Date().toISOString();
   database
     .prepare(
-      `INSERT INTO users (email, name, role, password_hash, is_active, created_at, updated_at)
-       VALUES (?, ?, 'admin', ?, 1, ?, ?)`
+      `INSERT INTO users (email, name, role, password_hash, auth_provider, login_name, is_active, created_at, updated_at)
+       VALUES (?, ?, 'admin', ?, 'local', ?, 1, ?, ?)`
     )
-    .run(email, "Administrator", passwordHash, now, now);
+    .run(email, "Administrator", passwordHash, email, now, now);
 }
 
 function mergeDuplicateDocuments(database: Database.Database) {

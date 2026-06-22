@@ -3,18 +3,26 @@ services:
     build: .
     container_name: project-document-library
     ports:
-      - "3000:3000"
+      - "13000:3000"
     environment:
       DATA_DIR: /data
-      APP_PROJECT_NAME: "Project A Document Library"
-      AUTH_SECRET: "replace-with-a-long-random-secret"
-      ADMIN_EMAIL: "admin@example.com"
-      ADMIN_PASSWORD_HASH: "replace-with-generated-password-hash"
+      AUTH_MODE: "sso"
+      APP_BASE_URL: "http://172.16.200.12:13000"
+      APP_PROJECT_NAME: "莱阳项目文档库"
+      AUTH_SECRET: "n7Rk2VxQ9mP4sT6cH1zF8aL3wY5bD0uE"
+      ADMIN_EMAIL: "helpdesk@ssecc.com.cn"
+      ADMIN_PASSWORD_HASH: "scrypt:v1:16384:8:1:6WQZNI9uMEpMxTjK1xiy2Q:F_0-m9nmrLBdGUX-xBn2qVyN_oHkSKMCOlsF8HQK1YuRE4joHd0xHcaxhN3tfRY9zE1yrCaj4iVKuo75V1jylg"
+      SSO_ISSUER_URL: "https://172.16.200.12:5001/webman/sso"
+      SSO_CLIENT_ID: "0ed997806b6c0c0b2bd448ad02e8d7e7"
+      SSO_CLIENT_SECRET: "NLdbXlxx7T464ZLI44gVzlJYCrEz6WP4"
+      SSO_SCOPE: "openid profile email"
+      SSO_LOCAL_ADMIN_FALLBACK: "1"
+      SSO_ALLOW_INSECURE_TLS: "1"
       NODE_OPTIONS: "--max-old-space-size=3072"
       NEXT_TELEMETRY_DISABLED: "1"
     volumes:
-      - ./data/project-a/files:/data/files
-      - ./data/project-a/db:/data/db
+      - /volume1/莱阳项目/设计文件/文档库/files:/data/files
+      - /volume1/莱阳项目/设计文件/文档库/db:/data/db
     restart: unless-stopped
 
   # To deploy another project, copy the service, change the port, and mount
@@ -26,10 +34,18 @@ services:
   #     - "3001:3000"
   #   environment:
   #     DATA_DIR: /data
+  #     AUTH_MODE: "local"
+  #     APP_BASE_URL: "http://NAS-IP:3001"
   #     APP_PROJECT_NAME: "Project B Document Library"
   #     AUTH_SECRET: "replace-with-a-long-random-secret"
   #     ADMIN_EMAIL: "admin@example.com"
   #     ADMIN_PASSWORD_HASH: "replace-with-generated-password-hash"
+  #     SSO_ISSUER_URL: ""
+  #     SSO_CLIENT_ID: ""
+  #     SSO_CLIENT_SECRET: ""
+  #     SSO_SCOPE: "openid profile email"
+  #     SSO_LOCAL_ADMIN_FALLBACK: "1"
+  #     SSO_ALLOW_INSECURE_TLS: "0"
   #     NODE_OPTIONS: "--max-old-space-size=3072"
   #     NEXT_TELEMETRY_DISABLED: "1"
   #   volumes:

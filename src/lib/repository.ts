@@ -23,8 +23,170 @@ export type UploadResult = {
   documentId?: number;
 };
 
+export type DeleteUploadResult = UploadResult & {
+  deletedDocument?: boolean;
+};
+
+export type DocumentStatistics = {
+  activeDocuments: number;
+  totalVersions: number;
+  totalChanges: number;
+  obsoleteDocuments: number;
+};
+
+export type DetailedStatistics = DocumentStatistics & {
+  averageVersionsPerDocument: number;
+  averageChangesPerDocument: number;
+  obsoleteRate: number;
+  storageSize: number;
+  versionStorageSize: number;
+  changeStorageSize: number;
+  versionDistribution: {
+    single: number;
+    multiple: number;
+    heavy: number;
+  };
+  changeDistribution: {
+    none: number;
+    few: number;
+    many: number;
+  };
+  recentUploads: {
+    last7Days: number;
+    last30Days: number;
+    latestUploadTime: string | null;
+  };
+};
+
 export function getProjectName() {
   return process.env.APP_PROJECT_NAME?.trim() || "文档资料库";
+}
+
+export function getDocumentStatistics(): DocumentStatistics {
+  const database = getDb();
+
+  const docStats = database
+    .prepare(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
+        SUM(CASE WHEN status = 'obsolete' THEN 1 ELSE 0 END) as obsolete
+       FROM documents`
+    )
+    .get() as { total: number; active: number; obsolete: number };
+
+  const versionStats = database
+    .prepare(`SELECT COUNT(*) as totalVersions FROM document_versions`)
+    .get() as { totalVersions: number };
+
+  const changeStats = database
+    .prepare(`SELECT COUNT(*) as totalChanges FROM document_changes`)
+    .get() as { totalChanges: number };
+
+  return {
+    activeDocuments: docStats.active,
+    totalVersions: versionStats.totalVersions,
+    totalChanges: changeStats.totalChanges,
+    obsoleteDocuments: docStats.obsolete
+  };
+}
+
+export function getDetailedStatistics(): DetailedStatistics {
+  const database = getDb();
+  const basic = getDocumentStatistics();
+
+  // 平均值计算
+  const totalDocs = basic.activeDocuments + basic.obsoleteDocuments;
+  const avgVersions = totalDocs > 0 ? basic.totalVersions / totalDocs : 0;
+  const avgChanges = totalDocs > 0 ? basic.totalChanges / totalDocs : 0;
+  const obsoleteRate = totalDocs > 0 ? (basic.obsoleteDocuments / totalDocs) * 100 : 0;
+
+  // 存储空间统计
+  const storageStats = database
+    .prepare(
+      `SELECT
+        COALESCE(SUM(file_size), 0) as versionSize
+       FROM document_versions`
+    )
+    .get() as { versionSize: number };
+
+  const changeStorageStats = database
+    .prepare(
+      `SELECT
+        COALESCE(SUM(file_size), 0) as changeSize
+       FROM document_changes`
+    )
+    .get() as { changeSize: number };
+
+  // 版本分布统计
+  const versionDist = database
+    .prepare(
+      `SELECT
+        SUM(CASE WHEN version_count = 1 THEN 1 ELSE 0 END) as single,
+        SUM(CASE WHEN version_count >= 2 AND version_count <= 5 THEN 1 ELSE 0 END) as multiple,
+        SUM(CASE WHEN version_count >= 6 THEN 1 ELSE 0 END) as heavy
+       FROM (
+         SELECT document_id, COUNT(*) as version_count
+         FROM document_versions
+         GROUP BY document_id
+       )`
+    )
+    .get() as { single: number; multiple: number; heavy: number };
+
+  // 变更分布统计
+  const changeDist = database
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM documents WHERE id NOT IN (SELECT DISTINCT document_id FROM document_changes)) as none,
+        SUM(CASE WHEN change_count >= 1 AND change_count <= 5 THEN 1 ELSE 0 END) as few,
+        SUM(CASE WHEN change_count >= 6 THEN 1 ELSE 0 END) as many
+       FROM (
+         SELECT document_id, COUNT(*) as change_count
+         FROM document_changes
+         GROUP BY document_id
+       )`
+    )
+    .get() as { none: number; few: number; many: number };
+
+  // 活跃度统计
+  const now = new Date();
+  const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const recentStats = database
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM document_versions WHERE uploaded_at >= ?) as last7Days,
+        (SELECT COUNT(*) FROM document_versions WHERE uploaded_at >= ?) as last30Days,
+        (SELECT uploaded_at FROM document_versions ORDER BY uploaded_at DESC LIMIT 1) as latestUpload
+       `
+    )
+    .get(last7Days, last30Days) as { last7Days: number; last30Days: number; latestUpload: string | null };
+
+  return {
+    ...basic,
+    averageVersionsPerDocument: Math.round(avgVersions * 10) / 10,
+    averageChangesPerDocument: Math.round(avgChanges * 10) / 10,
+    obsoleteRate: Math.round(obsoleteRate * 10) / 10,
+    storageSize: storageStats.versionSize + changeStorageStats.changeSize,
+    versionStorageSize: storageStats.versionSize,
+    changeStorageSize: changeStorageStats.changeSize,
+    versionDistribution: {
+      single: versionDist.single || 0,
+      multiple: versionDist.multiple || 0,
+      heavy: versionDist.heavy || 0
+    },
+    changeDistribution: {
+      none: changeDist.none || 0,
+      few: changeDist.few || 0,
+      many: changeDist.many || 0
+    },
+    recentUploads: {
+      last7Days: recentStats.last7Days,
+      last30Days: recentStats.last30Days,
+      latestUploadTime: recentStats.latestUpload
+    }
+  };
 }
 
 export async function saveUpload(file: File): Promise<UploadResult> {
@@ -153,7 +315,15 @@ async function saveChangeUpload(file: File, parsed: Extract<ReturnType<typeof pa
   }
 }
 
-export function listCurrentDocuments(query = "", includeObsolete = false) {
+export type SortField = "code" | "title" | "status" | "version" | "change_count" | "uploaded_at";
+export type SortOrder = "asc" | "desc";
+
+export function listCurrentDocuments(
+  query = "",
+  includeObsolete = false,
+  sortBy: SortField = "code",
+  sortOrder: SortOrder = "asc"
+) {
   const like = `%${query.trim()}%`;
   const database = getDb();
   const searchWhere = query.trim()
@@ -172,7 +342,32 @@ export function listCurrentDocuments(query = "", includeObsolete = false) {
     : "";
   const statusWhere = includeObsolete ? "" : "AND d.status = 'active'";
 
-  return database
+  // 构建 ORDER BY 子句
+  let orderByClause = "ORDER BY ";
+  switch (sortBy) {
+    case "code":
+      orderByClause += `d.code ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    case "title":
+      orderByClause += `d.title ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    case "status":
+      orderByClause += `d.status ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    case "version":
+      orderByClause += `v.version ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    case "change_count":
+      orderByClause += `change_count ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    case "uploaded_at":
+      orderByClause += `v.uploaded_at ${sortOrder === "asc" ? "ASC" : "DESC"}`;
+      break;
+    default:
+      orderByClause += "d.code ASC";
+  }
+
+  const results = database
     .prepare(
       `SELECT d.*,
               v.id AS version_id,
@@ -190,9 +385,19 @@ export function listCurrentDocuments(query = "", includeObsolete = false) {
          GROUP BY document_id
        ) c ON c.document_id = d.id
        WHERE 1 = 1 ${statusWhere} ${searchWhere}
-       ORDER BY d.code ASC`
+       ${orderByClause}`
     )
     .all({ like }) as CurrentDocumentRow[];
+
+  // 对于版本号，需要使用自定义排序
+  if (sortBy === "version") {
+    results.sort((a, b) => {
+      const comparison = compareVersions(a.version, b.version);
+      return sortOrder === "asc" ? comparison : -comparison;
+    });
+  }
+
+  return results;
 }
 
 export function getDocumentDetail(id: number): DocumentDetail | null {
@@ -315,6 +520,79 @@ export async function replaceChangeFile(changeId: number, file: File): Promise<U
   return { ok: true, message: "变更单文件已替换", documentId: existing.document_id };
 }
 
+export function deleteVersionFile(versionId: number): DeleteUploadResult {
+  const database = getDb();
+  const existing = database
+    .prepare(
+      `SELECT v.*, d.code
+       FROM document_versions v
+       JOIN documents d ON d.id = v.document_id
+       WHERE v.id = ?`
+    )
+    .get(versionId) as (DocumentVersionRow & { code: string }) | undefined;
+
+  if (!existing) {
+    return { ok: false, message: "version not found" };
+  }
+
+  const versionFiles = database
+    .prepare("SELECT stored_path FROM document_versions WHERE document_id = ?")
+    .all(existing.document_id) as Array<Pick<DocumentVersionRow, "stored_path">>;
+  const changeFiles = database
+    .prepare("SELECT stored_path FROM document_changes WHERE document_id = ?")
+    .all(existing.document_id) as Array<Pick<DocumentChangeRow, "stored_path">>;
+  const versionCount = versionFiles.length;
+  const pathsToRemove =
+    versionCount <= 1 ? [...versionFiles, ...changeFiles].map((row) => row.stored_path) : [existing.stored_path];
+
+  database.transaction(() => {
+    if (versionCount <= 1) {
+      database.prepare("DELETE FROM document_changes WHERE document_id = ?").run(existing.document_id);
+      database.prepare("DELETE FROM document_versions WHERE document_id = ?").run(existing.document_id);
+      database.prepare("DELETE FROM documents WHERE id = ?").run(existing.document_id);
+    } else {
+      database.prepare("DELETE FROM document_versions WHERE id = ?").run(versionId);
+      refreshCurrentVersion(existing.document_id);
+      database.prepare("UPDATE documents SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), existing.document_id);
+    }
+  })();
+
+  for (const storedPath of pathsToRemove) {
+    removeStoredFileIfExists(storedPath);
+  }
+
+  return {
+    ok: true,
+    message: versionCount <= 1 ? "document deleted" : "version deleted",
+    documentId: existing.document_id,
+    deletedDocument: versionCount <= 1
+  };
+}
+
+export function deleteChangeFile(changeId: number): DeleteUploadResult {
+  const database = getDb();
+  const existing = database
+    .prepare("SELECT * FROM document_changes WHERE id = ?")
+    .get(changeId) as DocumentChangeRow | undefined;
+
+  if (!existing) {
+    return { ok: false, message: "change file not found" };
+  }
+
+  database.transaction(() => {
+    database.prepare("DELETE FROM document_changes WHERE id = ?").run(changeId);
+    database.prepare("UPDATE documents SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), existing.document_id);
+  })();
+
+  removeStoredFileIfExists(existing.stored_path);
+
+  return {
+    ok: true,
+    message: "change file deleted",
+    documentId: existing.document_id
+  };
+}
+
 function refreshCurrentVersion(documentId: number) {
   const database = getDb();
   const versions = database
@@ -355,6 +633,19 @@ function removeFileIfExists(storedPath: string) {
   if (fs.existsSync(storedPath)) {
     fs.rmSync(storedPath, { force: true });
   }
+}
+
+function removeStoredFileIfExists(storedPath: string) {
+  const resolvedFilesDir = path.resolve(filesDir);
+  const resolvedStoredPath = path.resolve(storedPath);
+  const insideFilesDir =
+    resolvedStoredPath === resolvedFilesDir || resolvedStoredPath.startsWith(`${resolvedFilesDir}${path.sep}`);
+
+  if (!insideFilesDir) {
+    throw new Error("refusing to delete file outside data directory");
+  }
+
+  removeFileIfExists(resolvedStoredPath);
 }
 
 function safeFilename(filename: string) {

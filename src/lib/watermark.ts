@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { degrees, PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import type { CurrentUser, RequestContext } from "@/lib/auth";
 import { getWatermarkSettings } from "@/lib/settings";
+import { displayUserName } from "@/lib/user-display";
 
 const cacheTtlMs = 2 * 60 * 1000;
 const previewCache = new Map<string, { expiresAt: number; bytesPromise: Promise<Buffer> }>();
@@ -62,7 +63,7 @@ async function buildWatermarkedPdf(input: {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const now = new Date().toLocaleString("zh-CN", { hour12: false });
   const watermark = toPdfSafeText([
-    input.user.name || input.user.email,
+    displayUserName(input.user),
     input.user.email,
     input.context.ipAddress ? `IP ${input.context.ipAddress}` : null,
     now,

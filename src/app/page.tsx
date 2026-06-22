@@ -1,30 +1,40 @@
 import Link from "next/link";
 import { logoutAction } from "@/app/actions";
+import { SortableHeader } from "@/app/sortable-header";
+import { StatisticsButton } from "@/app/statistics-button";
 import { UploadForm } from "@/app/upload-form";
 import { canAdmin, canMaintain, requireUser } from "@/lib/auth";
-import { getProjectName, listCurrentDocuments } from "@/lib/repository";
+import { getDetailedStatistics, getProjectName, listCurrentDocuments, type SortField, type SortOrder } from "@/lib/repository";
+import { displayUserName } from "@/lib/user-display";
 
 type HomeProps = {
-  searchParams: Promise<{ q?: string; includeObsolete?: string; error?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; includeObsolete?: string; error?: string; page?: string; sortBy?: string; sortOrder?: string }>;
 };
 
 const pageSize = 50;
 
 export default async function Home({ searchParams }: HomeProps) {
   const user = await requireUser();
-  const { q = "", includeObsolete: includeObsoleteParam, error, page: pageParam } = await searchParams;
+  const params = await searchParams;
+  const { q = "", includeObsolete: includeObsoleteParam, error, page: pageParam, sortBy = "code", sortOrder = "asc" } = params;
   const includeObsolete = includeObsoleteParam === "1";
   const currentPage = Math.max(Number(pageParam) || 1, 1);
-  const allDocuments = listCurrentDocuments(q, includeObsolete);
+  const allDocuments = listCurrentDocuments(q, includeObsolete, sortBy as SortField, sortOrder as SortOrder);
   const totalPages = Math.max(Math.ceil(allDocuments.length / pageSize), 1);
   const safePage = Math.min(currentPage, totalPages);
   const documents = allDocuments.slice((safePage - 1) * pageSize, safePage * pageSize);
   const projectName = getProjectName();
   const maintainer = canMaintain(user);
+
+  // 构建 URLSearchParams 用于传递给 SortableHeader
+  const currentParams = new URLSearchParams();
+  if (q) currentParams.set("q", q);
+  if (includeObsolete) currentParams.set("includeObsolete", "1");
+  if (sortBy) currentParams.set("sortBy", sortBy);
+  if (sortOrder) currentParams.set("sortOrder", sortOrder);
+
   const pageHref = (page: number) => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (includeObsolete) params.set("includeObsolete", "1");
+    const params = new URLSearchParams(currentParams);
     if (page > 1) params.set("page", String(page));
     const query = params.toString();
     return query ? `/?${query}` : "/";
@@ -40,7 +50,7 @@ export default async function Home({ searchParams }: HomeProps) {
           <div className="home-actions">
             <div className="user-pill">
               <span className="status active">
-                {user.name} / {roleLabel(user.role)}
+                {displayUserName(user)} / {roleLabel(user.role)}
               </span>
             </div>
             {canAdmin(user) ? (
@@ -76,18 +86,33 @@ export default async function Home({ searchParams }: HomeProps) {
       <section className="panel">
         <div className="panel-title">
           <h2>{includeObsolete ? "项目文件列表" : "当前在用文件"}</h2>
-          <span>
-            {allDocuments.length} 个 / 第 {safePage} 页
-          </span>
+          <div className="panel-title-right">
+            <span>
+              {allDocuments.length} 个 / 第 {safePage} 页
+            </span>
+            {maintainer ? <StatisticsButton stats={getDetailedStatistics()} /> : null}
+          </div>
         </div>
         <div className="table">
           <div className="table-head">
-            <span>文件编号</span>
-            <span>标题</span>
-            <span>状态</span>
-            <span>版本</span>
-            <span>变更</span>
-            <span>上传时间</span>
+            <SortableHeader field="code" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              文件编号
+            </SortableHeader>
+            <SortableHeader field="title" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              标题
+            </SortableHeader>
+            <SortableHeader field="status" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              状态
+            </SortableHeader>
+            <SortableHeader field="version" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              版本
+            </SortableHeader>
+            <SortableHeader field="change_count" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              变更
+            </SortableHeader>
+            <SortableHeader field="uploaded_at" currentSortBy={sortBy} currentSortOrder={sortOrder} searchParams={currentParams}>
+              上传时间
+            </SortableHeader>
             <span>操作</span>
           </div>
           {documents.map((document) => (

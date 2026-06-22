@@ -2,6 +2,7 @@ import { adminResetPasswordAction, createUserAction, updateUserAction } from "@/
 import { AdminNav } from "@/app/admin/admin-nav";
 import { requireRole } from "@/lib/auth";
 import { getDb, type UserRow } from "@/lib/db";
+import { displayAccountName } from "@/lib/user-display";
 
 export default async function AdminUsersPage() {
   const user = await requireRole(["admin"]);
@@ -14,13 +15,13 @@ export default async function AdminUsersPage() {
         <div>
           <p className="eyebrow">Admin</p>
           <h1>用户管理</h1>
-          <p>创建账号、调整角色、停用账号和重置密码。</p>
+          <p>创建本地应急账号、调整角色、停用账号。SSO 用户密码由 NAS 统一管理。</p>
         </div>
       </section>
 
       <section className="panel form-panel">
         <div className="panel-title">
-          <h2>新增用户</h2>
+          <h2>新增本地用户</h2>
         </div>
         <form className="stack-form" action={createUserAction}>
           <input name="email" type="email" placeholder="邮箱" required />
@@ -31,7 +32,9 @@ export default async function AdminUsersPage() {
             <option value="admin">管理员</option>
           </select>
           <input name="password" type="password" placeholder="初始强密码" required />
-          <button className="fit" type="submit">创建</button>
+          <button className="fit" type="submit">
+            创建
+          </button>
         </form>
       </section>
 
@@ -42,7 +45,7 @@ export default async function AdminUsersPage() {
         </div>
         <div className="user-table">
           <div className="user-row user-head">
-            <span>邮箱</span>
+            <span>账号</span>
             <span>姓名</span>
             <span>角色</span>
             <span>状态</span>
@@ -53,7 +56,11 @@ export default async function AdminUsersPage() {
             <article className="user-row" key={row.id}>
               <form className="user-edit-form" action={updateUserAction}>
                 <input type="hidden" name="id" value={row.id} />
-                <strong>{row.email}</strong>
+                <div className="user-identity">
+                  <strong>{displayAccountName(row.login_name) || displayAccountName(row.email)}</strong>
+                  <span>{row.auth_provider === "synology-sso" ? "NAS SSO" : "本地账号"}</span>
+                  {row.email !== row.login_name ? <small>{row.email}</small> : null}
+                </div>
                 <input name="name" defaultValue={row.name} />
                 <select name="role" defaultValue={row.role}>
                   <option value="employee">一般员工</option>
@@ -66,11 +73,15 @@ export default async function AdminUsersPage() {
                 </label>
                 <button type="submit">保存</button>
               </form>
-              <form className="user-password-form" action={adminResetPasswordAction}>
-                <input type="hidden" name="id" value={row.id} />
-                <input name="password" type="password" placeholder="新强密码" required />
-                <button type="submit">重置密码</button>
-              </form>
+              {row.auth_provider === "local" ? (
+                <form className="user-password-form" action={adminResetPasswordAction}>
+                  <input type="hidden" name="id" value={row.id} />
+                  <input name="password" type="password" placeholder="新强密码" required />
+                  <button type="submit">重置密码</button>
+                </form>
+              ) : (
+                <span className="muted-note">由 NAS 管理</span>
+              )}
             </article>
           ))}
         </div>

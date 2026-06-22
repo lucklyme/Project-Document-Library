@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { markObsolete, replaceChangeAction, replaceVersionAction, restoreActive } from "@/app/actions";
+import { deleteChangeAction, deleteVersionAction, markObsolete, replaceChangeAction, replaceVersionAction, restoreActive } from "@/app/actions";
+import { ConfirmSubmitButton } from "@/app/confirm-submit-button";
 import { writeAuditLog } from "@/lib/audit";
 import { canMaintain, getRequestContext, requireUser } from "@/lib/auth";
 import { getDocumentDetail, getProjectName } from "@/lib/repository";
@@ -55,6 +56,8 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
 
       {error === "replace" ? <p className="error">替换失败：请确认新文件是同一文件编号和同一 Rev。</p> : null}
       {error === "replaceChange" ? <p className="error">变更单替换失败：请确认新文件是同一文件编号和同一 XG 流水号。</p> : null}
+      {error === "delete" ? <p className="error">删除版本失败，请刷新后重试。</p> : null}
+      {error === "deleteChange" ? <p className="error">删除变更单失败，请刷新后重试。</p> : null}
 
       <div className="document-history-grid">
         <section className="panel">
@@ -84,6 +87,18 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
                         <input type="hidden" name="versionId" value={version.id} />
                         <input name="file" type="file" required />
                         <button type="submit">替换</button>
+                      </form>
+                    ) : null}
+                    {maintainer ? (
+                      <form action={deleteVersionAction}>
+                        <input type="hidden" name="documentId" value={document.id} />
+                        <input type="hidden" name="versionId" value={version.id} />
+                        <ConfirmSubmitButton
+                          className="danger compact-danger-button"
+                          message="确定删除这个版本吗？如果这是最后一个版本，该文档及关联变更单也会一起删除。"
+                        >
+                          删除
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </div>
@@ -119,6 +134,15 @@ export default async function DocumentDetailPage({ params, searchParams }: Detai
                         <input type="hidden" name="changeId" value={change.id} />
                         <input name="file" type="file" required />
                         <button type="submit">替换</button>
+                      </form>
+                    ) : null}
+                    {maintainer ? (
+                      <form action={deleteChangeAction}>
+                        <input type="hidden" name="documentId" value={document.id} />
+                        <input type="hidden" name="changeId" value={change.id} />
+                        <ConfirmSubmitButton className="danger compact-danger-button" message="确定删除这个变更单吗？">
+                          删除
+                        </ConfirmSubmitButton>
                       </form>
                     ) : null}
                   </div>

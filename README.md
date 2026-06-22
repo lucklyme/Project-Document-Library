@@ -190,3 +190,27 @@ PRJ-QZ77-ELEC-4820-XG-773 示例电缆路径调整通知.pdf
 - `AUTH_SECRET` 应使用足够长的随机字符串。
 - 定期备份 `DATA_DIR`。
 - NAS 部署建议优先通过内网或 VPN 访问。
+
+## Synology SSO 登录
+
+系统支持使用群晖 SSO/OIDC 作为主登录方式。启用后，用户通过 NAS 账号登录，文档系统只维护角色和启用状态。
+
+环境变量：
+
+```env
+AUTH_MODE=sso
+APP_BASE_URL=https://your-domain-or-nas:13000
+SSO_ISSUER_URL=https://your-synology-sso-issuer
+SSO_CLIENT_ID=your-client-id
+SSO_CLIENT_SECRET=your-client-secret
+SSO_SCOPE="openid profile email"
+SSO_LOCAL_ADMIN_FALLBACK=1
+```
+
+在群晖 SSO 客户端中配置回调地址：
+
+```text
+https://your-domain-or-nas:13000/api/auth/sso/callback
+```
+
+首次 SSO 登录的用户会自动创建为“一般员工”。管理员可在后台用户管理中调整为“资料员”或“管理员”。`/login/local-admin` 是本地管理员应急入口，用于 SSO 配置异常时进入后台。

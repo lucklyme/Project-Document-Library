@@ -10,7 +10,10 @@ const rememberedSessionMaxAgeSeconds = 60 * 60 * 24 * 7;
 const maxFailedLogins = 5;
 const lockoutMinutes = 15;
 
-export type CurrentUser = Pick<UserRow, "id" | "email" | "name" | "role">;
+export type CurrentUser = Pick<UserRow, "id" | "email" | "name" | "role"> & {
+  authProvider?: UserRow["auth_provider"];
+  loginName?: string | null;
+};
 
 export type RequestContext = {
   ipAddress: string | null;
@@ -36,7 +39,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const database = getDb();
   const row = database
     .prepare(
-      `SELECT u.id, u.email, u.name, u.role, u.is_active
+      `SELECT u.id, u.email, u.name, u.role, u.auth_provider AS authProvider, u.login_name AS loginName, u.is_active
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ?`
@@ -53,7 +56,9 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     id: row.id,
     email: row.email,
     name: row.name,
-    role: row.role
+    role: row.role,
+    authProvider: row.authProvider,
+    loginName: row.loginName
   };
 }
 
@@ -73,14 +78,26 @@ export async function requireRole(roles: UserRole[]) {
   return user;
 }
 
-export async function authenticateUser(email: string, password: string, context: RequestContext, remember = false) {
+export async function authenticateUser(
+  email: string,
+  password: string,
+  context: RequestContext,
+  remember = false,
+  options: { adminOnly?: boolean } = {}
+) {
   const database = getDb();
   const normalizedEmail = email.trim().toLowerCase();
-  const user = database.prepare("SELECT * FROM users WHERE email = ?").get(normalizedEmail) as UserRow | undefined;
+  const user = database
+    .prepare("SELECT * FROM users WHERE email = ? AND auth_provider = 'local'")
+    .get(normalizedEmail) as UserRow | undefined;
   const now = new Date();
 
   if (!user || user.is_active !== 1) {
     return { ok: false as const, reason: "invalid" as const, user: null };
+  }
+
+  if (options.adminOnly && user.role !== "admin") {
+    return { ok: false as const, reason: "invalid" as const, user };
   }
 
   if (user.locked_until && new Date(user.locked_until) > now) {
@@ -125,7 +142,7 @@ export async function createSession(user: Pick<UserRow, "id">, context: RequestC
   (await cookies()).set(sessionCookie, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(),
     maxAge,
     path: "/"
   });
@@ -159,4 +176,8 @@ export function getRequestContextFromRequest(request: Request): RequestContext {
 
 export function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("base64url");
+}
+
+export function shouldUseSecureCookies() {
+  return process.env.APP_BASE_URL?.trim().toLowerCase().startsWith("https://") ?? false;
 }
